@@ -1,70 +1,179 @@
-# Getting Started with Create React App
+# ElectroHub Marketplace
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A full-stack electronics marketplace built using **FastAPI + PostgreSQL** on the backend and **React + Axios** on the frontend. This project includes authentication (JWT), user management, product listing structure, and a clean architecture suitable for cloud deployment.
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## Features
 
-### `npm start`
+### **Backend (FastAPI)**
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+* JWT Authentication (Login)
+* PostgreSQL database (SQLAlchemy models)
+* Modular service-based architecture
+* CORS-enabled API
+* Secure password hashing (bcrypt/passlib)
+* Environment-based configuration
+* Seed data + schema setup scripts
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### **Frontend (React)**
 
-### `npm test`
+* Login page connected to FastAPI backend
+* AuthContext for global authentication state
+* Axios client with token injection
+* Protected routes structure
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+---
 
-### `npm run build`
+## Architecture Diagram
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```mermaid
+graph TD;
+    subgraph Frontend [React Frontend]
+        A[Login Page] --> B[AuthContext]
+        B --> C[Axios Client]
+    end
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+    subgraph Backend [FastAPI Backend]
+        D[/Auth Router/]
+        E[/User Service/]
+        F[/Security Utils/]
+        G[(PostgreSQL Database)]
+    end
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+    C -->|POST /auth/login| D
+    D -->|Validate Credentials| E
+    E -->|Verify Password Hash| F
+    E -->|Fetch User| G
+    F -->|Return JWT| D
+    D -->|JSON Response<br/>Token + User Info| C
 
-### `npm run eject`
+    C -->|store token| B
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+---
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+## Project Structure
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+```
+electrohub-marketplace/
+│
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   └── services/
+│   ├── requirements.txt
+│   └── start_backend.sh
+│
+├── frontend/
+│   ├── public/
+│   ├── src/
+│   │   ├── context/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   └── App.jsx
+│   ├── package.json
+│   └── README.md
+│
+└── database/
+    ├── 01_schema.sql
+    ├── 02_indexes.sql
+    ├── 03_seed_data.py
+    └── init_database.sh
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+---
 
-## Learn More
+## Backend Setup
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+### **1. Install dependencies**
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+cd backend
+pip install -r requirements.txt
+```
 
-### Code Splitting
+### **2. Start FastAPI**
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+```bash
+./start_backend.sh
+```
 
-### Analyzing the Bundle Size
+Or manually:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+```bash
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010
+```
 
-### Making a Progressive Web App
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+## Test Authentication
 
-### Advanced Configuration
+```bash
+curl -X POST http://localhost:8010/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"demo@electrohub.com","password":"password123"}'
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+Should return:
 
-### Deployment
+```json
+{
+  "access_token": "<JWT>",
+  "token_type": "bearer",
+  "user": {
+    "user_id": "user_demo_001",
+    "email": "demo@electrohub.com"
+  }
+}
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+---
 
-### `npm run build` fails to minify
+## Frontend Setup
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Make sure the frontend uses the correct backend URL:
+
+```
+src/services/api.js
+```
+
+```js
+const api = axios.create({
+  baseURL: "https://8010-<your-cloudshell-id>.cloudshell.dev"
+});
+```
+
+---
+
+## Environment Variables (.env)
+
+Place inside both backend and database setup if needed:
+
+```
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=electrohub
+DB_USER=postgres
+DB_PASSWORD=password
+JWT_SECRET_KEY=supersecretkey123
+```
+
+---
+
+## Future Enhancements
+
+* Product Listing + Search
+* Cloud Deploy (GKE + Load Balancer)
+
+
+---
