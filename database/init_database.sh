@@ -17,9 +17,9 @@ PGPASSWORD=$DB_PASSWORD psql -h 127.0.0.1 -U postgres -d electrohub -f 02_indexe
 echo "✅ Indexes created"
 echo ""
 
-# Step 3: Generate synthetic data
+# Step 3: Generate synthetic data (uses venv python)
 echo "🌱 Generating synthetic data..."
-python3 03_seed_data.py
+python 03_seed_data.py
 echo "✅ Data generated"
 echo ""
 

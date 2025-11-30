@@ -1,0 +1,84 @@
+"""
+🔐 SECURITY MODULE - Password & JWT handling
+"""
+from datetime import datetime, timedelta
+import jwt
+import os
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "electrohub-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 10080
+
+def verify_password(plain_password: str, stored_password: str) -> bool:
+    print(f"\n{'='*90}")
+    print(f"🔑 [SECURITY.verify_password] CHECKING PASSWORD")
+    print(f"{'='*90}")
+    print(f"   📝 Plain text:  '{plain_password}'")
+    print(f"   🗄️  DB stored:   '{stored_password}'")
+    
+    if stored_password is None:
+        print(f"   ❌ FAIL: Stored password is NULL!")
+        print(f"{'='*90}\n")
+        return False
+    
+    match = (plain_password == stored_password)
+    if match:
+        print(f"   ✅ PASS: Passwords match!")
+    else:
+        print(f"   ❌ FAIL: Passwords don't match!")
+    print(f"{'='*90}\n")
+    return match
+
+def get_password_hash(password: str) -> str:
+    print(f"\n🔐 [SECURITY.get_password_hash] STORING PASSWORD")
+    print(f"   Input: '{password}'")
+    print(f"   Action: Storing as plaintext (DEMO MODE)")
+    return password
+
+def create_access_token(user_id: str, expires_delta=None):
+    print(f"\n{'='*90}")
+    print(f"🎫 [SECURITY.create_access_token] CREATING JWT TOKEN")
+    print(f"{'='*90}")
+    print(f"   👤 User ID: {user_id}")
+    
+    if expires_delta is None:
+        expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    expire = datetime.utcnow() + expires_delta
+    print(f"   ⏰ Expiration: {expire} ({ACCESS_TOKEN_EXPIRE_MINUTES} minutes)")
+    
+    to_encode = {
+        "sub": user_id,
+        "exp": expire,
+        "iat": datetime.utcnow()
+    }
+    
+    try:
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        print(f"   ✅ Token created successfully")
+        print(f"   🔑 Token: {encoded_jwt[:60]}...")
+        print(f"{'='*90}\n")
+        return encoded_jwt
+    except Exception as e:
+        print(f"   ❌ ERROR: {str(e)}")
+        print(f"{'='*90}\n")
+        raise
+
+def decode_token(token: str):
+    try:
+        print(f"\n🔓 [SECURITY.decode_token] DECODING TOKEN")
+        print(f"   Token: {token[:60]}...")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        print(f"   ✅ Valid token")
+        print(f"   👤 User ID: {user_id}\n")
+        return user_id
+    except jwt.ExpiredSignatureError:
+        print(f"   ❌ Token expired\n")
+        return None
+    except jwt.InvalidTokenError as e:
+        print(f"   ❌ Invalid token: {e}\n")
+        return None
+    except Exception as e:
+        print(f"   ❌ Decode error: {e}\n")
+        return None

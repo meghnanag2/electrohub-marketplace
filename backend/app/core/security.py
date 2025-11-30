@@ -1,40 +1,37 @@
+# backend/app/core/security.py
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+import hashlib
+import jwt
+import os
+from typing import Optional
 
-import jwt  # PyJWT
-from app.core.config import settings
-
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "electrohub-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
-
-
-def verify_password(plain_password: str, stored_password: str) -> bool:
-    """
-    Demo-only: compare plain text password.
-
-    In production you would use a secure hash (bcrypt, argon2, etc.).
-    """
-    return plain_password == stored_password
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 60 * 24 * 7))
 
 
 def get_password_hash(password: str) -> str:
-    """
-    Demo-only: store plain text password as-is.
-    """
-    return password
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Create a signed JWT token using the config secret.
-    Tries JWT_SECRET_KEY first, then SECRET_KEY, otherwise falls back to a default.
-    """
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
+def verify_password(plain_password: str, stored_password: str) -> bool:
+    return get_password_hash(plain_password) == stored_password
 
-    # Handle both possible config names
-    secret = getattr(settings, "JWT_SECRET_KEY", None) or getattr(settings, "SECRET_KEY", None) or "change-me"
 
-    encoded_jwt = jwt.encode(to_encode, secret, algorithm=ALGORITHM)
-    return encoded_jwt
+def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+    if expires_delta is None:
+        expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    expire = datetime.utcnow() + expires_delta
+    to_encode = {"sub": str(subject), "exp": expire}
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_access_token(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("sub")
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None

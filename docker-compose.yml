@@ -1,0 +1,76 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: electrohub-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: electrohub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/02_indexes.sql:/docker-entrypoint-initdb.d/02_indexes.sql
+      - ./database/03_seed_data.sql:/docker-entrypoint-initdb.d/03_seed_data.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - electrohub-network
+  redis:
+    image: redis:7-alpine
+    container_name: electrohub-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - electrohub-network
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: electrohub-backend
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET_KEY: your-super-secret-key-change-in-production
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - electrohub-network
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: electrohub-frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - electrohub-network
+volumes:
+  postgres_data:
+  redis_data:
+networks:
+  electrohub-network:
