@@ -1,14 +1,12 @@
-# backend/app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.api import routes
 from app.core.database import Base, engine
-from app.api import auth
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="ElectroHub API")
+
+# Create tables (no harm; your schema is already there)
+Base.metadata.create_all(bind=engine)
 
 origins = [
     "http://localhost:3000",
@@ -23,15 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
-app.include_router(auth.router)
-
+app.include_router(routes.router)
 
 @app.get("/health")
-def health():
+def health_check():
     return {"status": "ok"}
-
-
-@app.get("/status")
-def status_endpoint():
-    return {"service": "electrohub-api", "status": "ok"}

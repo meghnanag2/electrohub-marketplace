@@ -19,6 +19,7 @@ DB_CONFIG = {
     'port': 5432
 }
 
+
 CATEGORIES = {
     'Electronics': {
         'items': ['iPhone 14 Pro', 'Samsung Galaxy S23', 'MacBook Air M2', 'Dell XPS 15', 
