@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="images/logo.png" alt="E-HUB Logo" width="160"/>
+  <img src="images/logo.png" alt="E-HUB Logo" width="500"/>
 
   <h1>ElectroHub</h1>
   <p>A full-stack electronics marketplace built on microservices — buy, sell, chat, and discover products in real time.</p>
@@ -14,12 +14,12 @@
   </p>
 </div>
 
----
+
 
 ## Where to Start
 
 | I want to… | Go here |
-|---|---|
+|||
 | Run the project locally | [Getting Started](#getting-started) in this file |
 | Understand how services connect | [Architecture Diagram](#architecture-diagram) in this file |
 | See all API endpoints | [API Reference](#api-reference) in this file |
@@ -28,7 +28,7 @@
 | Change environment variables or secrets | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Environment Variables |
 | Understand the database schema | [Data Model](#data-model) in this file |
 
----
+
 
 ## What it is
 
@@ -36,7 +36,7 @@ ElectroHub is a peer-to-peer marketplace for electronics. Users list items, buye
 
 Everything runs locally in Docker — one `docker compose up` brings up the full stack.
 
----
+
 
 ## Features
 
@@ -47,7 +47,7 @@ Everything runs locally in Docker — one `docker compose up` brings up the full
 - **Notification Bell** — live unread message count in the navbar, polls every 30 seconds
 - **JWT Auth** — token stored in localStorage, injected into every API call via Axios interceptor
 
----
+
 
 ## Screenshots
 
@@ -115,91 +115,54 @@ Everything runs locally in Docker — one `docker compose up` brings up the full
   </tr>
 </table>
 
----
+
 
 ## Architecture Diagram
 
 ```mermaid
 graph TD;
-    subgraph Frontend [React Frontend]
-        A[Login Page] --> B[AuthContext]
-        B --> C[Axios Client]
-        C --> H[Home / Browse]
-        C --> ID[Item Detail]
-        C --> INB[Inbox / Thread]
-        C --> WL[Wishlist]
+    FE[React Frontend]
+
+    subgraph GW [API Gateway]
+        NGINX[Nginx]
     end
 
-    subgraph Gateway [Nginx API Gateway]
-        N[/Rate Limiter/]
+    subgraph SVC [Microservices]
+        US[user-service :8001]
+        LS[listing-service :8002]
+        MS[messaging-service :8003]
+        AS[activity-service :8004]
+        RS[recommendation-service :8005]
     end
 
-    subgraph UserSvc [user-service :8001]
-        UA[/Auth Router/]
-        US[/User Service/]
-        SEC[/Security Utils/]
-        UG[(gRPC Server)]
-    end
-
-    subgraph ListingSvc [listing-service :8002]
-        LR[/Listing Router/]
-        WSH[/Wishlist Handler/]
-    end
-
-    subgraph MessagingSvc [messaging-service :8003]
-        MR[/Message Router/]
-        WS[WebSocket Hub]
-    end
-
-    subgraph RecoSvc [recommendation-service :8005]
-        EMB[SBERT Encoder]
-        IDX[Embedding Index]
-    end
-
-    subgraph Data [Data Layer]
+    subgraph DATA [Data Layer]
         PG[(PostgreSQL)]
         RD[(Redis)]
         KF[Kafka]
         RMQ[RabbitMQ]
     end
 
-    C -->|POST /auth/login| N
-    N -->|proxy| UA
-    UA -->|Validate Credentials| US
-    US -->|Verify Password Hash| SEC
-    US -->|Fetch User| PG
-    SEC -->|Return JWT| UA
-    UA -->|Token + User Info| C
-    C -->|store token| B
+    FE -->|HTTP / WebSocket| NGINX
+    NGINX --> US
+    NGINX --> LS
+    NGINX --> MS
+    NGINX --> AS
+    NGINX --> RS
 
-    C -->|GET /marketplace/items| N
-    N -->|proxy| LR
-    LR -->|Query items| PG
-    LR -->|Return items[]| C
+    US --> PG
+    LS --> PG
+    LS --> RD
+    MS --> PG
+    MS --> RD
+    LS --> KF
+    AS --> KF
+    MS --> RMQ
 
-    C -->|POST /marketplace/items/save| N
-    N -->|proxy| WSH
-    WSH -->|SADD wishlist:uid| RD
-    WSH -->|INSERT item_saved| PG
-
-    C -->|GET /recommendations/id| N
-    N -->|proxy| EMB
-    EMB -->|cosine similarity| IDX
-    IDX -->|top-N items| C
-
-    C -->|WS /messages/ws/...| N
-    N -->|WS upgrade| WS
-    WS -->|PUBLISH/SUBSCRIBE| RD
-
-    MR -->|persist message| PG
-    MR -->|notify job| RMQ
-    LR -->|item_viewed event| KF
-
-    MessagingSvc -->|gRPC VerifyToken| UG
-    ListingSvc -->|gRPC VerifyToken| UG
+    MS -.->|gRPC VerifyToken| US
+    LS -.->|gRPC VerifyToken| US
 ```
 
----
+
 
 ## Login Flow
 
@@ -222,60 +185,10 @@ graph TD;
     E -->|Verify Password Hash| F
     E -->|Fetch User| G
     F -->|Return JWT| D
-    D -->|JSON Response<br/>Token + User Info| C
+    D -->|JSON Response - Token + User Info| C
     C -->|store token| B
 ```
 
----
-
-## Buying & Wishlist Flow
-
-```mermaid
-graph TD;
-    subgraph Frontend [React Frontend]
-        H[Home Page] --> AX[Axios Client]
-        ID[Item Detail] --> AX
-        WL[Wishlist Page] --> AX
-    end
-
-    subgraph ListingSvc [listing-service]
-        LR[/Listing Router/]
-        WH[/Wishlist Handler/]
-        PQ[(PostgreSQL)]
-    end
-
-    subgraph RecoSvc [recommendation-service]
-        ENC[SBERT Encoder]
-        MAT[Embedding Matrix]
-    end
-
-    RD[(Redis<br/>wishlist:uid SET)]
-
-    AX -->|GET /marketplace/items| LR
-    LR -->|Query + filter| PQ
-    PQ -->|items[]| LR
-    LR -->|thumbnail + price + category| H
-
-    AX -->|GET /marketplace/items/id| LR
-    LR -->|INCREMENT views_count| PQ
-    LR -->|item detail + images[]| ID
-
-    ID -->|GET /recommendations/id| ENC
-    ENC -->|dot product| MAT
-    MAT -->|top-6 similar listings| ID
-
-    AX -->|POST /items/id/save| WH
-    WH -->|SADD wishlist:uid itemId| RD
-    WH -->|INSERT item_saved| PQ
-    WH -->|saved:true saves_count:N| AX
-
-    AX -->|GET /users/me/saved| WH
-    WH -->|SMEMBERS wishlist:uid| RD
-    RD -->|item IDs| WH
-    WH -->|items[]| WL
-```
-
----
 
 ## Real-time Chat Flow
 
@@ -299,8 +212,8 @@ graph TD;
         GT[gRPC Server]
     end
 
-    RD[(Redis Pub/Sub<br/>conv:id channel)]
-    PG[(PostgreSQL<br/>marketplace_messages)]
+    RD[(Redis Pub/Sub)]
+    PG[(PostgreSQL)]
 
     BC -->|WS /messages/ws/itemId/sellerId?token=| HUB
     SC -->|WS /messages/ws/itemId/buyerId?token=| HUB
@@ -317,12 +230,12 @@ graph TD;
     HUB -->|deliver message| SC
 ```
 
----
+
 
 ## System Components
 
 | Component | Tech | Role |
-|---|---|---|
+||||
 | `user-service` | FastAPI · bcrypt · PyJWT | Registration, login, JWT issue & verification via gRPC |
 | `listing-service` | FastAPI · SQLAlchemy · Redis | Item CRUD, browse/search, wishlist (Redis SET + Postgres) |
 | `messaging-service` | FastAPI · WebSocket · Redis Pub/Sub | Real-time chat, inbox, unread count |
@@ -334,7 +247,7 @@ graph TD;
 | `kafka` | Apache Kafka 3.7 (KRaft) | Item view event streaming |
 | `rabbitmq` | RabbitMQ 3 | Async notification delivery |
 
----
+
 
 ## Data Model
 
@@ -393,7 +306,7 @@ erDiagram
     marketplace_items ||--o{ marketplace_messages : "discussed in"
 ```
 
----
+
 
 ## Getting Started
 
@@ -414,7 +327,7 @@ docker compose up --build
 First build takes ~5 minutes — PyTorch and sentence-transformers layers are large. Subsequent starts use the Docker layer cache and are much faster.
 
 | Service | URL |
-|---|---|
+|||
 | Frontend | http://localhost:3000 |
 | API Gateway | http://localhost:80 |
 | user-service | http://localhost:8001 |
@@ -430,17 +343,6 @@ docker exec -it electrohub-backend python seed_all.py
 ```
 
 Creates 100 users · 500 items across 6 categories · 995 product images · 3,000 interactions · 200 sample messages.
-
-### Test credentials
-
-Any seeded user works:
-
-```
-email:    user_000001@example.com
-password: password123
-```
-
----
 
 ## Project Structure
 
@@ -474,21 +376,21 @@ electrohub/
     └── seed_all.py
 ```
 
----
+
 
 ## API Reference
 
 ### Auth
 
 | Method | Path | Description |
-|---|---|---|
+||||
 | POST | `/auth/register` | Create account |
 | POST | `/auth/login` | Returns JWT + user object |
 
 ### Marketplace
 
 | Method | Path | Description |
-|---|---|---|
+||||
 | GET | `/marketplace/items` | List / search items (`search`, `category`, `limit`, `skip`) |
 | GET | `/marketplace/items/{id}` | Item detail — also increments view count |
 | GET | `/marketplace/items/{id}/saved` | Check if item is in current user's wishlist |
@@ -500,7 +402,7 @@ electrohub/
 ### Messaging
 
 | Method | Path | Description |
-|---|---|---|
+||||
 | POST | `/messages/send` | Send a message |
 | GET | `/messages/inbox` | All received messages |
 | GET | `/messages/unread-count` | Badge count (unread messages) |
@@ -509,10 +411,10 @@ electrohub/
 ### Recommendations
 
 | Method | Path | Description |
-|---|---|---|
+||||
 | GET | `/recommendations/{item_id}?limit=6` | Top-N similar items via SBERT |
 
----
+
 
 ## How SBERT Recommendations Work
 
@@ -526,14 +428,14 @@ Each string is encoded with `all-MiniLM-L6-v2` (384-dimensional embeddings, L2-n
 
 The model is downloaded and baked into the Docker image at build time, so there are no cold-start downloads in production.
 
----
+
 
 ## Wishlist & Redis
 
 The wishlist uses a Redis `SET` per user (`wishlist:{user_id}`):
 
 | Operation | Redis command | Complexity |
-|---|---|---|
+||||
 | Save item | `SADD wishlist:{uid} {item_id}` | O(1) |
 | Unsave item | `SREM wishlist:{uid} {item_id}` | O(1) |
 | Check if saved | `SISMEMBER wishlist:{uid} {item_id}` | O(1) |
@@ -541,7 +443,7 @@ The wishlist uses a Redis `SET` per user (`wishlist:{user_id}`):
 
 Every save/unsave is also written to the `item_saved` Postgres table. On cache miss (e.g. after a Redis restart), the service reads from Postgres and re-warms the Redis SET automatically.
 
----
+
 
 ## Capacity & Rate Limits
 
@@ -552,7 +454,7 @@ This section documents what the system can actually handle, derived directly fro
 Limits are enforced **per IP address** by Nginx using token bucket zones defined in [`nginx/nginx.conf`](nginx/nginx.conf):
 
 | Zone | Steady rate | Burst allowance | Applies to |
-|---|---|---|---|
+|||||
 | `api_login` | 5 req / min | +2 immediate | `/auth/*` |
 | `api_browse` | 60 req / min | +20 immediate | `/marketplace/*` |
 | `api_general` | 30 req / min | +10 immediate | `/messages/*`, `/activity/*`, all others |
@@ -561,14 +463,14 @@ Limits are enforced **per IP address** by Nginx using token bucket zones defined
 
 Exceeding a limit returns HTTP `429 Too Many Requests`. Each zone has 10 MB of shared memory, enough to track ~78,000 unique IPs simultaneously before eviction.
 
----
+
 
 ### Database Connection Capacity
 
 PostgreSQL is running with its default `max_connections = 100` (confirmed on the live container). Each service holds a SQLAlchemy connection pool:
 
 | Service | `pool_size` | `max_overflow` | Max DB connections |
-|---|---|---|---|
+|||||
 | `user-service` | 5 | 10 | **15** |
 | `listing-service` | 5 | 10 | **15** |
 | `messaging-service` | 5 | 10 | **15** (SQLAlchemy default) |
@@ -579,26 +481,26 @@ With 48 connections consumed by services and PostgreSQL reserving 3 for superuse
 
 > Source: `services/*/app/core/database.py` and `docker exec electrohub-postgres-shard0 psql -c "SHOW max_connections;"`
 
----
+
 
 ### Concurrency Limits
 
 | Layer | Hard limit | Evidence |
-|---|---|---|
+||||
 | Nginx simultaneous connections | **1,024** | `worker_connections 1024` in `nginx.conf` line 1 |
 | Concurrent WebSocket sessions | **~300** | Shares the 1,024 connection budget with HTTP; each WS is a persistent connection |
 | Concurrent DB queries (listing) | **15** | `pool_size=5, max_overflow=10` in `listing-service/app/core/database.py` |
 | Concurrent DB queries (all services) | **48** | Sum of all pool maxima above |
 | PostgreSQL hard ceiling | **100** | `SHOW max_connections` on live container |
 
----
+
 
 ### Realistic Concurrent User Estimate
 
 All five services run as **single-process Uvicorn** (no `--workers` flag in any Dockerfile CMD). FastAPI is async, so I/O-bound work (DB queries, Redis calls) runs concurrently within one process. CPU-bound work serialises.
 
 | Workload type | Estimated concurrent users | Bottleneck |
-|---|---|---|
+||||
 | Browsing / searching | **50 – 100** | Single Uvicorn worker on listing-service; async I/O helps but CPU serialises at ~100 |
 | Active WebSocket chat | **200 – 300** | Nginx connection budget (1,024 shared with HTTP traffic) |
 | Recommendation queries | **10 – 20** | SBERT inference is CPU-bound; ~100–500 ms per call on CPU-only PyTorch, single process serialises |
@@ -606,19 +508,19 @@ All five services run as **single-process Uvicorn** (no `--workers` flag in any 
 
 The **recommendation service** is the first thing to saturate under load — SBERT runs on CPU, inference blocks the event loop, and there is no worker pool. Under realistic usage (not every page view hits recommendations simultaneously) this is fine for a development deployment.
 
----
+
 
 ### What Would Need to Change for Production Scale
 
 | Current limitation | Production fix |
-|---|---|
+|||
 | Single Uvicorn worker per service | Add `--workers 4` (or use Gunicorn + Uvicorn workers) |
 | SBERT single-process CPU inference | Add worker pool or move to a GPU instance |
 | `max_connections = 100` on Postgres | Raise to 200–500, or add PgBouncer as a connection pooler |
 | No resource limits in `docker-compose.yml` | Add `mem_limit` and `cpus` per service to prevent one container starving others |
 | Nginx single worker | Set `worker_processes auto` to use all CPU cores |
 
----
+
 
 ## Further Reading
 
@@ -628,16 +530,13 @@ The **recommendation service** is the first thing to saturate under load — SBE
 - [`services/recommendation-service/app/main.py`](services/recommendation-service/app/main.py) — SBERT embedding and similarity logic
 - [`backend/seed_all.py`](backend/seed_all.py) — data seed script (users, items, images, messages)
 
----
+
 
 <div align="center">
+## Author
 
-MIT License — © 2026 Meghna Nag
+**Meghna Nag**
+*University of Colorado Boulder — 2025*
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-
+© 2026 Meghna Nag. All rights reserved.
 </div>
