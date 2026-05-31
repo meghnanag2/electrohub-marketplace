@@ -15,11 +15,10 @@
 </div>
 
 
-
 ## Where to Start
 
 | I want to… | Go here |
-|||
+|---|---|
 | Run the project locally | [Getting Started](#getting-started) in this file |
 | Understand how services connect | [Architecture Diagram](#architecture-diagram) in this file |
 | See all API endpoints | [API Reference](#api-reference) in this file |
@@ -27,8 +26,6 @@
 | Deploy to a server / production notes | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Production Readiness |
 | Change environment variables or secrets | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Environment Variables |
 | Understand the database schema | [Data Model](#data-model) in this file |
-
-
 
 ## What it is
 
@@ -327,9 +324,9 @@ docker compose up --build
 First build takes ~5 minutes — PyTorch and sentence-transformers layers are large. Subsequent starts use the Docker layer cache and are much faster.
 
 | Service | URL |
-|||
+|---|---|
 | Frontend | http://localhost:3000 |
-| API Gateway | http://localhost:80 |
+| API Gateway | http://localhost:8080 |
 | user-service | http://localhost:8001 |
 | listing-service | http://localhost:8002 |
 | messaging-service | http://localhost:8003 |
@@ -383,14 +380,14 @@ electrohub/
 ### Auth
 
 | Method | Path | Description |
-||||
+|---|---|---|
 | POST | `/auth/register` | Create account |
 | POST | `/auth/login` | Returns JWT + user object |
 
 ### Marketplace
 
 | Method | Path | Description |
-||||
+|---|---|---|
 | GET | `/marketplace/items` | List / search items (`search`, `category`, `limit`, `skip`) |
 | GET | `/marketplace/items/{id}` | Item detail — also increments view count |
 | GET | `/marketplace/items/{id}/saved` | Check if item is in current user's wishlist |
@@ -402,7 +399,7 @@ electrohub/
 ### Messaging
 
 | Method | Path | Description |
-||||
+|---|---|---|
 | POST | `/messages/send` | Send a message |
 | GET | `/messages/inbox` | All received messages |
 | GET | `/messages/unread-count` | Badge count (unread messages) |
@@ -411,7 +408,7 @@ electrohub/
 ### Recommendations
 
 | Method | Path | Description |
-||||
+|---|---|---|
 | GET | `/recommendations/{item_id}?limit=6` | Top-N similar items via SBERT |
 
 
@@ -435,7 +432,7 @@ The model is downloaded and baked into the Docker image at build time, so there 
 The wishlist uses a Redis `SET` per user (`wishlist:{user_id}`):
 
 | Operation | Redis command | Complexity |
-||||
+|---|---|---|
 | Save item | `SADD wishlist:{uid} {item_id}` | O(1) |
 | Unsave item | `SREM wishlist:{uid} {item_id}` | O(1) |
 | Check if saved | `SISMEMBER wishlist:{uid} {item_id}` | O(1) |
@@ -454,7 +451,7 @@ This section documents what the system can actually handle, derived directly fro
 Limits are enforced **per IP address** by Nginx using token bucket zones defined in [`nginx/nginx.conf`](nginx/nginx.conf):
 
 | Zone | Steady rate | Burst allowance | Applies to |
-|||||
+|---|---|---|---|
 | `api_login` | 5 req / min | +2 immediate | `/auth/*` |
 | `api_browse` | 60 req / min | +20 immediate | `/marketplace/*` |
 | `api_general` | 30 req / min | +10 immediate | `/messages/*`, `/activity/*`, all others |
@@ -470,7 +467,7 @@ Exceeding a limit returns HTTP `429 Too Many Requests`. Each zone has 10 MB of s
 PostgreSQL is running with its default `max_connections = 100` (confirmed on the live container). Each service holds a SQLAlchemy connection pool:
 
 | Service | `pool_size` | `max_overflow` | Max DB connections |
-|||||
+|---|---|---|---|
 | `user-service` | 5 | 10 | **15** |
 | `listing-service` | 5 | 10 | **15** |
 | `messaging-service` | 5 | 10 | **15** (SQLAlchemy default) |
@@ -485,13 +482,13 @@ With 48 connections consumed by services and PostgreSQL reserving 3 for superuse
 
 ### Concurrency Limits
 
-| Layer | Hard limit | Evidence |
-||||
-| Nginx simultaneous connections | **1,024** | `worker_connections 1024` in `nginx.conf` line 1 |
-| Concurrent WebSocket sessions | **~300** | Shares the 1,024 connection budget with HTTP; each WS is a persistent connection |
-| Concurrent DB queries (listing) | **15** | `pool_size=5, max_overflow=10` in `listing-service/app/core/database.py` |
-| Concurrent DB queries (all services) | **48** | Sum of all pool maxima above |
-| PostgreSQL hard ceiling | **100** | `SHOW max_connections` on live container |
+| Layer | Hard limit    | Evidence |
+|---|------|---|
+| Nginx simultaneous connections | **1,024**      | `worker_connections 1024` in `nginx.conf` line 1 |
+| Concurrent WebSocket sessions | **~300**      | Shares the 1,024 connection budget with HTTP; each WS is a persistent connection |
+| Concurrent DB queries (listing) | **15**      | `pool_size=5, max_overflow=10` in `listing-service/app/core/database.py` |
+| Concurrent DB queries (all services) | **48**      | Sum of all pool maxima above |
+| PostgreSQL hard ceiling | **100**      | `SHOW max_connections` on live container |
 
 
 
@@ -500,36 +497,13 @@ With 48 connections consumed by services and PostgreSQL reserving 3 for superuse
 All five services run as **single-process Uvicorn** (no `--workers` flag in any Dockerfile CMD). FastAPI is async, so I/O-bound work (DB queries, Redis calls) runs concurrently within one process. CPU-bound work serialises.
 
 | Workload type | Estimated concurrent users | Bottleneck |
-||||
+|---|---|---|
 | Browsing / searching | **50 – 100** | Single Uvicorn worker on listing-service; async I/O helps but CPU serialises at ~100 |
 | Active WebSocket chat | **200 – 300** | Nginx connection budget (1,024 shared with HTTP traffic) |
 | Recommendation queries | **10 – 20** | SBERT inference is CPU-bound; ~100–500 ms per call on CPU-only PyTorch, single process serialises |
 | Login / register | **5 per IP / min** | Nginx `api_login` zone; bcrypt is intentionally slow (~200 ms), limits effective throughput |
 
 The **recommendation service** is the first thing to saturate under load — SBERT runs on CPU, inference blocks the event loop, and there is no worker pool. Under realistic usage (not every page view hits recommendations simultaneously) this is fine for a development deployment.
-
-
-
-### What Would Need to Change for Production Scale
-
-| Current limitation | Production fix |
-|||
-| Single Uvicorn worker per service | Add `--workers 4` (or use Gunicorn + Uvicorn workers) |
-| SBERT single-process CPU inference | Add worker pool or move to a GPU instance |
-| `max_connections = 100` on Postgres | Raise to 200–500, or add PgBouncer as a connection pooler |
-| No resource limits in `docker-compose.yml` | Add `mem_limit` and `cpus` per service to prevent one container starving others |
-| Nginx single worker | Set `worker_processes auto` to use all CPU cores |
-
-
-
-## Further Reading
-
-- [`DEPLOYMENT.md`](DEPLOYMENT.md) — step-by-step setup, container reference, troubleshooting, and production notes
-- [`database/01_schema.sql`](database/01_schema.sql) — full database schema
-- [`nginx/nginx.conf`](nginx/nginx.conf) — rate limiting zones and upstream routing
-- [`services/recommendation-service/app/main.py`](services/recommendation-service/app/main.py) — SBERT embedding and similarity logic
-- [`backend/seed_all.py`](backend/seed_all.py) — data seed script (users, items, images, messages)
-
 
 
 <div align="center">
