@@ -15,19 +15,7 @@
 </div>
 
 
-## Where to Start
-
-| I want to… | Go here |
-|---|---|
-| Run the project locally | [Getting Started](#getting-started) in this file |
-| Understand how services connect | [Architecture Diagram](#architecture-diagram) in this file |
-| See all API endpoints | [API Reference](#api-reference) in this file |
-| Debug a broken container or service | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Troubleshooting |
-| Deploy to a server / production notes | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Production Readiness |
-| Change environment variables or secrets | [`DEPLOYMENT.md`](DEPLOYMENT.md) → Environment Variables |
-| Understand the database schema | [Data Model](#data-model) in this file |
-
-## What it is
+## Introduction
 
 ElectroHub is a peer-to-peer marketplace for electronics. Users list items, buyers browse and filter by category, message sellers directly, save items to a wishlist, and get AI-powered recommendations based on what they're viewing.
 
