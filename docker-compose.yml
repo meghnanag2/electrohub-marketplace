@@ -1,0 +1,365 @@
+##############################################################################
+#  ElectroHub — Microservices docker-compose
+#
+#  Services:
+#    Infrastructure:  postgres_shard0, postgres_shard1, redis, nginx
+#    Microservices:   user-service, listing-service, messaging-service,
+#                     notification-service, activity-service
+#    Observability:   prometheus, grafana
+#
+#  All service builds use repo root as context so Dockerfiles can access
+#  both protos/ and services/shared/.
+#
+#  Ports:
+#    :80    Nginx (API gateway — use this for all client requests)
+#    :8001  user-service (direct debug)
+#    :8002  listing-service (direct debug)
+#    :8003  messaging-service (direct debug)
+#    :8004  activity-service (direct debug)
+#    :5432  Postgres shard 0
+#    :5433  Postgres shard 1
+#    :6379  Redis
+#    :9090  Prometheus
+#    :3001  Grafana
+##############################################################################
+
+services:
+
+  # ── Infrastructure ───────────────────────────────────────────────────── #
+
+  postgres_shard0:
+    image: postgres:15-alpine
+    container_name: electrohub-postgres-shard0
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: electrohub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_shard0_data:/var/lib/postgresql/data
+      - ./database/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/02_indexes.sql:/docker-entrypoint-initdb.d/02_indexes.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres_shard1:
+    image: postgres:15-alpine
+    container_name: electrohub-postgres-shard1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: electrohub
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_shard1_data:/var/lib/postgresql/data
+      - ./database/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/02_indexes.sql:/docker-entrypoint-initdb.d/02_indexes.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: electrohub-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka (KRaft mode — no Zookeeper needed) ────────────────────────── #
+  # Event streaming: item views, saves, messages → feeds Spark → ML model
+  # UI: none (use kafka-python consumer or Kafka UI at port 8080 if added)
+  kafka:
+    image: apache/kafka:3.7.1
+    container_name: electrohub-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "electrohub-kafka-cluster-01"
+    volumes:
+      - kafka_data:/opt/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── RabbitMQ (persistent notification jobs) ──────────────────────────── #
+  # Used by: messaging-service publishes → notification-service consumes
+  # UI: http://localhost:15672  (guest / guest)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: electrohub-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP (services connect here)
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── Seed runner — runs once, exits after populating all tables ──────── #
+  seed:
+    image: python:3.11-slim
+    container_name: electrohub-seed
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+    volumes:
+      - ./backend/seed_all.py:/seed_all.py
+    command: >
+      sh -c "pip install faker sqlalchemy psycopg2-binary --quiet &&
+             python3 /seed_all.py"
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+    restart: "no"
+
+  # ── Microservices ────────────────────────────────────────────────────── #
+  # Build context = repo root so Dockerfiles can COPY protos/ and shared/
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: electrohub-user-service
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET_KEY: electrohub-dev-secret-change-in-production
+    ports:
+      - "8001:8001"    # REST
+      # 50051 (gRPC) is internal-only — not exposed to host
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  listing-service:
+    build:
+      context: .
+      dockerfile: services/listing-service/Dockerfile
+    container_name: electrohub-listing-service
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      USER_SERVICE_ADDR: user-service:50051
+    ports:
+      - "8002:8002"    # REST
+      # 50052 (gRPC) internal-only
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  messaging-service:
+    build:
+      context: .
+      dockerfile: services/messaging-service/Dockerfile
+    container_name: electrohub-messaging-service
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      USER_SERVICE_ADDR: user-service:50051
+      LISTING_SERVICE_ADDR: listing-service:50052
+      JWT_SECRET_KEY: electrohub-dev-secret-change-in-production
+      KAFKA_BROKERS: kafka:9092
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      listing-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8003/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: electrohub-notification-service
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SMTP_HOST: ""
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  activity-service:
+    build:
+      context: .
+      dockerfile: services/activity-service/Dockerfile
+    container_name: electrohub-activity-service
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8004/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  recommendation-service:
+    build:
+      context: .
+      dockerfile: services/recommendation-service/Dockerfile
+    container_name: electrohub-recommendation-service
+    environment:
+      DB_HOST: postgres_shard0
+      DB_PORT: 5432
+      DB_NAME: electrohub
+      DB_USER: postgres
+      DB_PASSWORD: password
+    ports:
+      - "8005:8005"
+    depends_on:
+      postgres_shard0:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8005/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ── Nginx API Gateway ─────────────────────────────────────────────────── #
+
+  nginx:
+    image: nginx:alpine
+    container_name: electrohub-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - user-service
+      - listing-service
+      - messaging-service
+      - activity-service
+      - recommendation-service
+
+  # ── Observability ────────────────────────────────────────────────────── #
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: electrohub-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    depends_on:
+      - user-service
+      - listing-service
+      - messaging-service
+      - activity-service
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: electrohub-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_shard0_data:
+  postgres_shard1_data:
+  kafka_data:
+  rabbitmq_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
