@@ -493,8 +493,7 @@ All five services run as **single-process Uvicorn** (no `--workers` flag in any 
 
 The **recommendation service** is the first thing to saturate under load — SBERT runs on CPU, inference blocks the event loop, and there is no worker pool. Under realistic usage (not every page view hits recommendations simultaneously) this is fine for a development deployment.
 
-
-<div align="center">
+  
 ## Author
 
 **Meghna Nag**
