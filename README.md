@@ -220,7 +220,7 @@ graph TD;
 ## System Components
 
 | Component | Tech | Role |
-||||
+|---|---|---|
 | `user-service` | FastAPI · bcrypt · PyJWT | Registration, login, JWT issue & verification via gRPC |
 | `listing-service` | FastAPI · SQLAlchemy · Redis | Item CRUD, browse/search, wishlist (Redis SET + Postgres) |
 | `messaging-service` | FastAPI · WebSocket · Redis Pub/Sub | Real-time chat, inbox, unread count |
