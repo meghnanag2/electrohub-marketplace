@@ -34,7 +34,7 @@ Everything runs locally in Docker — one `docker compose up` brings up the full
 
 
 
-## Screenshots
+## Website:
 
 <table>
   <tr>
@@ -293,7 +293,7 @@ erDiagram
 
 
 
-## Getting Started
+## Setup & Installation
 
 ### Prerequisites
 
